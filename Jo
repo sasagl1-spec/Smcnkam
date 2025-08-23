@@ -1,0 +1,134 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+from telethon.tl.types import KeyboardButtonCallback
+from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
+import asyncio
+
+@loader.tds
+class GramPiarInlineMod(loader.Module):
+    """Работа с инлайн-кнопками @gram_piarbot"""
+    strings = {"name": "GramPiarInline"}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        self.bot_username = "gram_piarbot"
+
+    async def click_inline_button(self, button_text):
+        """Нажатие инлайн-кнопки по тексту"""
+        try:
+            bot_entity = await self._client(ResolveUsernameRequest(self.bot_username))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+            
+            # Получаем последнее сообщение от бота
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if not msg.out and msg.buttons:
+                    # Ищем нужную кнопку
+                    for row in msg.buttons:
+                        for button in row:
+                            if hasattr(button, 'text') and button_text in button.text:
+                                if isinstance(button, KeyboardButtonCallback):
+                                    # Нажимаем callback кнопку
+                                    await self._client(GetBotCallbackAnswerRequest(
+                                        peer=bot_input,
+                                        msg_id=msg.id,
+                                        data=button.data
+                                    ))
+                                    return True
+                    break
+            return False
+        except Exception as e:
+            print(f"Error clicking button: {e}")
+            return False
+
+    @loader.command()
+    async def inlineearncmd(self, message):
+        """Нажать инлайн-кнопку 'Заработать' - .inlineearn"""
+        try:
+            # Сначала отправляем /start для активации меню
+            await self._client(SendMessageRequest(
+                peer=await self._client.get_input_entity(self.bot_username),
+                message="/start",
+                no_webpage=True
+            ))
+            await asyncio.sleep(2)
+
+            # Нажимаем инлайн-кнопку "Заработать"
+            success = await self.click_inline_button("Заработать")
+            if success:
+                await utils.answer(message, "✅ Нажата кнопка 'Заработать'")
+                await asyncio.sleep(2)
+                
+                # Теперь нажимаем "Подписаться на канал"
+                channel_success = await self.click_inline_button("Подписаться на канал")
+                if channel_success:
+                    await utils.answer(message, "✅ Нажата кнопка 'Подписаться на канал'")
+                    
+                    # Ждем появления каналов для подписки
+                    await asyncio.sleep(3)
+                    await self.handle_subscription()
+                else:
+                    await utils.answer(message, "❌ Не найдена кнопка 'Подписаться на канал'")
+            else:
+                await utils.answer(message, "❌ Не найдена кнопка 'Заработать'")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    async def handle_subscription(self):
+        """Обработка подписки на каналы"""
+        try:
+            bot_entity = await self._client(ResolveUsernameRequest(self.bot_username))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+            
+            # Получаем сообщение с кнопками подписки
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if not msg.out and msg.buttons:
+                    # Ищем кнопки подписки (обычно с иконкой 📌 или ✅)
+                    for row in msg.buttons:
+                        for button in row:
+                            if hasattr(button, 'text') and ('Подписаться' in button.text or 'Subscribe' in button.text):
+                                if isinstance(button, KeyboardButtonCallback):
+                                    await self._client(GetBotCallbackAnswerRequest(
+                                        peer=bot_input,
+                                        msg_id=msg.id,
+                                        data=button.data
+                                    ))
+                                    await utils.answer(message, "✅ Нажата кнопка подписки")
+                                    return True
+                    break
+            return False
+        except Exception as e:
+            print(f"Subscription error: {e}")
+            return False
+
+    @loader.command()
+    async def inlinebtncmd(self, message):
+        """Нажать любую инлайн-кнопку - .inlinebtn <текст>"""
+        args = utils.get_args_raw(message)
+        if not args:
+            await utils.answer(message, "❌ Укажите текст кнопки\nПример: .inlinebtn Подписаться на канал")
+            return
+
+        success = await self.click_inline_button(args)
+        if success:
+            await utils.answer(message, f"✅ Нажата кнопка: {args}")
+        else:
+            await utils.answer(message, f"❌ Кнопка '{args}' не найдена")
+
+    @loader.command()
+    async def refreshcmd(self, message):
+        """Обновить меню бота - .refresh"""
+        try:
+            await self._client(SendMessageRequest(
+                peer=await self._client.get_input_entity(self.bot_username),
+                message="/start",
+                no_webpage=True
+            ))
+            await utils.answer(message, "🔄 Меню бота обновлено")
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
