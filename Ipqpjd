@@ -1,0 +1,116 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+import asyncio
+import re
+
+@loader.tds
+class GramPiarAutoEarnMod(loader.Module):
+    """Автоматический заработок в @gram_piarbot"""
+    strings = {"name": "GramPiarAutoEarn"}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        self.bot_username = "gram_piarbot"
+        self.completed_tasks = []
+
+    async def send_to_bot(self, message_text):
+        """Отправка сообщения боту и получение ответа"""
+        try:
+            bot_entity = await self._client(ResolveUsernameRequest(self.bot_username))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+            
+            await self._client(SendMessageRequest(
+                peer=bot_input,
+                message=message_text,
+                no_webpage=True
+            ))
+            
+            await asyncio.sleep(3)
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if not msg.out:
+                    return msg.text
+            return None
+        except Exception:
+            return None
+
+    @loader.command()
+    async def earnsubcmd(self, message):
+        """Заработать → Подписаться на канал - .earnsub"""
+        try:
+            # Шаг 1: Нажимаем "Заработать"
+            await utils.answer(message, "🔄 Нажимаю 'Заработать'...")
+            earn_response = await self.send_to_bot("Заработать")
+            
+            if not earn_response:
+                await utils.answer(message, "❌ Не удалось найти кнопку 'Заработать'")
+                return
+
+            # Шаг 2: Нажимаем "Подписаться на канал"
+            await utils.answer(message, "📌 Нажимаю 'Подписаться на канал'...")
+            sub_response = await self.send_to_bot("Подписаться на канал")
+            
+            if not sub_response:
+                await utils.answer(message, "❌ Не удалось найти кнопку 'Подписаться на канал'")
+                return
+
+            # Шаг 3: Парсим доступные каналы для подписки
+            channel_links = re.findall(r'(https?://t\.me/\S+|@\w+)', sub_response)
+            
+            if not channel_links:
+                await utils.answer(message, "❌ Не найдено каналов для подписки")
+                return
+
+            # Шаг 4: Подписываемся на первый доступный канал
+            target_channel = channel_links[0]
+            await utils.answer(message, f"🔗 Подписываюсь на: {target_channel}")
+            
+            sub_result = await self.send_to_bot(target_channel)
+            await asyncio.sleep(2)
+            
+            # Шаг 5: Подтверждаем подписку
+            confirm_result = await self.send_to_bot("✅ Подписаться")
+            
+            if confirm_result and ("проверка" in confirm_result.lower() or "успешно" in confirm_result.lower()):
+                self.completed_tasks.append(target_channel)
+                await utils.answer(message, f"✅ Успешно подписался на канал!\n📊 Выполнено заданий: {len(self.completed_tasks)}")
+            else:
+                await utils.answer(message, "❌ Не удалось подтвердить подписку")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command()
+    async def earnstatuscmd(self, message):
+        """Статус выполненных заданий - .earnstatus"""
+        if not self.completed_tasks:
+            await utils.answer(message, "📊 Выполнено заданий: 0")
+            return
+        
+        last_tasks = "\n".join(self.completed_tasks[-5:])
+        await utils.answer(message, f"📊 Выполнено заданий: {len(self.completed_tasks)}\n\nПоследние:\n{last_tasks}")
+
+    @loader.command()
+    async def earnclearcmd(self, message):
+        """Очистить историю заданий - .earnclear"""
+        self.completed_tasks.clear()
+        await utils.answer(message, "🗑️ История заданий очищена")
+
+    @loader.command()
+    async def earnautocmd(self, message):
+        """Автоматический режим - .earnauto"""
+        try:
+            await utils.answer(message, "🤖 Запускаю автоматический режим...")
+            
+            for i in range(5):  # Максимум 5 заданий за раз
+                await self.earnsubcmd(message)
+                await asyncio.sleep(5)
+                
+            await utils.answer(message, f"✅ Авторежим завершен\nВыполнено заданий: {len(self.completed_tasks)}")
+            
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка авторежима: {str(e)}")
