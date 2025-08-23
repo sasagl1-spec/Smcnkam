@@ -1,0 +1,231 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+from telethon.tl.types import KeyboardButton, KeyboardButtonCallback
+from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
+from telethon.tl.functions.channels import JoinChannelRequest
+import asyncio
+import re
+
+@loader.tds
+class GramPiarFullAutoMod(loader.Module):
+    """Полная автоматизация подписки через @gram_piarbot"""
+    strings = {"name": "GramPiarFullAuto"}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        self.bot_username = "gram_piarbot"
+        self.completed_tasks = []
+        self.current_channel = None
+
+    async def get_bot_message(self):
+        """Получить последнее сообщение от бота"""
+        try:
+            bot_entity = await self._client(ResolveUsernameRequest(self.bot_username))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+            
+            async for msg in self._client.iter_messages(bot_input, limit=1):
+                if not msg.out:
+                    return msg
+            return None
+        except Exception:
+            return None
+
+    async def click_button(self, button_text):
+        """Найти и нажать кнопку по тексту"""
+        try:
+            msg = await self.get_bot_message()
+            if not msg or not msg.buttons:
+                return False
+
+            for row in msg.buttons:
+                for button in row:
+                    if hasattr(button, 'text') and button_text in button.text:
+                        if isinstance(button, KeyboardButton):
+                            await self._client(SendMessageRequest(
+                                peer=await self._client.get_input_entity(self.bot_username),
+                                message=button.text,
+                                no_webpage=True
+                            ))
+                            return True
+                        elif isinstance(button, KeyboardButtonCallback):
+                            await self._client(GetBotCallbackAnswerRequest(
+                                peer=await self._client.get_input_entity(self.bot_username),
+                                msg_id=msg.id,
+                                data=button.data
+                            ))
+                            return True
+            return False
+        except Exception:
+            return False
+
+    async def extract_channel_link(self):
+        """Извлечь ссылку на канал из сообщения бота"""
+        try:
+            msg = await self.get_bot_message()
+            if not msg:
+                return None
+
+            # Ищем ссылки в тексте сообщения
+            links = re.findall(r'(https?://t\.me/\S+|@\w+)', msg.text)
+            return links[0] if links else None
+        except Exception:
+            return None
+
+    async def join_channel(self, channel_link):
+        """Подписаться на канал"""
+        try:
+            if channel_link.startswith('@'):
+                # Для username формата @channel
+                await self._client(JoinChannelRequest(channel_link))
+            elif 't.me/' in channel_link:
+                # Для полной ссылки https://t.me/channel
+                username = channel_link.split('/')[-1]
+                if username.startswith('+'):
+                    username = username[1:]
+                await self._client(JoinChannelRequest(f'@{username}'))
+            
+            self.current_channel = channel_link
+            return True
+        except Exception as e:
+            print(f"Join error: {e}")
+            return False
+
+    async def complete_task(self):
+        """Полный цикл выполнения задания"""
+        try:
+            # Шаг 1: Нажимаем "Подписать"
+            await utils.answer(message, "📌 Нажимаю 'Подписать'...")
+            if not await self.click_button("Подписать"):
+                return False
+
+            # Ждем перехода в канал
+            await asyncio.sleep(3)
+
+            # Шаг 2: Извлекаем ссылку на канал
+            channel_link = await self.extract_channel_link()
+            if not channel_link:
+                await utils.answer(message, "❌ Не найдена ссылка на канал")
+                return False
+
+            # Шаг 3: Подписываемся на канал
+            await utils.answer(message, f"🔗 Подписываюсь на: {channel_link}")
+            if not await self.join_channel(channel_link):
+                await utils.answer(message, "❌ Ошибка подписки на канал")
+                return False
+
+            # Ждем завершения подписки
+            await asyncio.sleep(2)
+
+            # Шаг 4: Возвращаемся к боту
+            await self._client(SendMessageRequest(
+                peer=await self._client.get_input_entity(self.bot_username),
+                message="/start",
+                no_webpage=True
+            ))
+            await asyncio.sleep(2)
+
+            # Шаг 5: Снова переходим в задания
+            await self.click_button("Заработать")
+            await asyncio.sleep(2)
+            await self.click_button("Подписаться на канал")
+            await asyncio.sleep(3)
+
+            # Шаг 6: Нажимаем "Проверить"
+            await utils.answer(message, "✅ Нажимаю 'Проверить'...")
+            if not await self.click_button("Проверить"):
+                return False
+
+            # Ждем результат проверки
+            await asyncio.sleep(3)
+            return True
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка выполнения: {str(e)}")
+            return False
+
+    @loader.command()
+    async def fulltaskcmd(self, message):
+        """Выполнить полное задание - .fulltask"""
+        try:
+            success = await self.complete_task()
+            if success:
+                self.completed_tasks.append(f"✅ {self.current_channel}")
+                await utils.answer(message, f"🎉 Задание выполнено! Канал: {self.current_channel}")
+            else:
+                await utils.answer(message, "❌ Не удалось выполнить задание")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command()
+    async def autotaskcmd(self, message):
+        """Авторежим выполнения заданий - .autotask <N>"""
+        try:
+            args = utils.get_args_raw(message)
+            count = int(args) if args and args.isdigit() else 1
+            count = min(count, 5)  # Максимум 5 заданий
+
+            await utils.answer(message, f"🤖 Запускаю {count} заданий...")
+            
+            successful = 0
+            for i in range(count):
+                await utils.answer(message, f"🔧 Задание {i+1}/{count}...")
+                if await self.complete_task():
+                    successful += 1
+                    self.completed_tasks.append(f"✅ Задание {i+1}")
+                await asyncio.sleep(3)
+
+            await utils.answer(message, f"📊 Выполнено: {successful}/{count} заданий")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command()
+    async def taskinfocmd(self, message):
+        """Информация о текущем задании - .taskinfo"""
+        try:
+            msg = await self.get_bot_message()
+            if not msg:
+                await utils.answer(message, "❌ Нет активного сообщения от бота")
+                return
+
+            # Ищем информацию о заданиях
+            task_info = ""
+            if "Подписать" in msg.text and "Проверить" in msg.text:
+                task_info = "📋 Доступны задания для подписки"
+            
+            # Ищем ссылки на каналы
+            links = re.findall(r'(https?://t\.me/\S+|@\w+)', msg.text)
+            if links:
+                task_info += f"\n🔗 Найдено каналов: {len(links)}"
+
+            await utils.answer(message, task_info if task_info else "❌ Нет информации о заданиях")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command()
+    async def resumecmd(self, message):
+        """Продолжить с текущего места - .resume"""
+        try:
+            # Проверяем, есть ли активное задание
+            if self.current_channel:
+                await utils.answer(message, f"🔄 Продолжаю с канала: {self.current_channel}")
+                # Возвращаемся к боту и продолжаем
+                await self._client(SendMessageRequest(
+                    peer=await self._client.get_input_entity(self.bot_username),
+                    message="/start",
+                    no_webpage=True
+                ))
+                await asyncio.sleep(2)
+                await self.click_button("Проверить")
+            else:
+                await utils.answer(message, "❌ Нет активного задания")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
