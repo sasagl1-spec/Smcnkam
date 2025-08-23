@@ -1,0 +1,171 @@
+# Telegram канал модулей: https://t.me/modulesTheHika
+# Создатель: @vipqlkxn
+
+from hikka import loader, utils
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.functions.contacts import ResolveUsernameRequest
+from telethon.tl.types import KeyboardButton, KeyboardButtonCallback
+from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
+import asyncio
+import re
+
+@loader.tds
+class GramPiarFullAutoMod(loader.Module):
+    """Полная автоматизация @gram_piarbot"""
+    strings = {"name": "GramPiarFullAuto"}
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+        self.bot_username = "gram_piarbot"
+        self.completed_tasks = []
+
+    async def get_bot_messages(self, limit=5):
+        """Получить последние сообщения от бота"""
+        try:
+            bot_entity = await self._client(ResolveUsernameRequest(self.bot_username))
+            bot_input = await self._client.get_input_entity(bot_entity.peer)
+            
+            messages = []
+            async for msg in self._client.iter_messages(bot_input, limit=limit):
+                if not msg.out:
+                    messages.append(msg)
+            return messages
+        except Exception:
+            return []
+
+    async def find_and_click_button(self, button_text, message=None):
+        """Найти и нажать кнопку по тексту"""
+        try:
+            if not message:
+                messages = await self.get_bot_messages(1)
+                if not messages:
+                    return False
+                message = messages[0]
+
+            if not message.buttons:
+                return False
+
+            for row in message.buttons:
+                for button in row:
+                    if hasattr(button, 'text') and button_text in button.text:
+                        if isinstance(button, KeyboardButton):
+                            # Обычная кнопка - отправляем текст
+                            await self._client(SendMessageRequest(
+                                peer=await self._client.get_input_entity(self.bot_username),
+                                message=button.text,
+                                no_webpage=True
+                            ))
+                            return True
+                        elif isinstance(button, KeyboardButtonCallback):
+                            # Callback кнопка - используем callback
+                            await self._client(GetBotCallbackAnswerRequest(
+                                peer=await self._client.get_input_entity(self.bot_username),
+                                msg_id=message.id,
+                                data=button.data
+                            ))
+                            return True
+            return False
+        except Exception:
+            return False
+
+    @loader.command()
+    async def fullautocmd(self, message):
+        """Полная автоматизация - .fullauto"""
+        try:
+            # Шаг 1: /start
+            await utils.answer(message, "🚀 Запускаю /start...")
+            await self._client(SendMessageRequest(
+                peer=await self._client.get_input_entity(self.bot_username),
+                message="/start",
+                no_webpage=True
+            ))
+            await asyncio.sleep(3)
+
+            # Шаг 2: Нажимаем "Заработать" в меню
+            await utils.answer(message, "💰 Нажимаю 'Заработать'...")
+            earn_success = await self.find_and_click_button("Заработать")
+            if not earn_success:
+                await utils.answer(message, "❌ Не найдена кнопка 'Заработать'")
+                return
+            await asyncio.sleep(3)
+
+            # Шаг 3: Нажимаем "Подписаться на канал"
+            await utils.answer(message, "📌 Нажимаю 'Подписаться на канал'...")
+            channel_success = await self.find_and_click_button("Подписаться на канал")
+            if not channel_success:
+                await utils.answer(message, "❌ Не найдена кнопка 'Подписаться на канал'")
+                return
+            await asyncio.sleep(3)
+
+            # Шаг 4: Ищем кнопку "Подписаться" в левом столбце
+            await utils.answer(message, "🔍 Ищу кнопку 'Подписаться'...")
+            messages = await self.get_bot_messages(3)
+            sub_success = False
+            
+            for msg in messages:
+                if msg.buttons:
+                    for row in msg.buttons:
+                        for button in row:
+                            if hasattr(button, 'text') and "Подписаться" in button.text and "Проверить" not in button.text:
+                                sub_success = await self.find_and_click_button(button.text, msg)
+                                if sub_success:
+                                    break
+                        if sub_success:
+                            break
+                    if sub_success:
+                        break
+            
+            if not sub_success:
+                await utils.answer(message, "❌ Не найдена кнопка 'Подписаться'")
+                return
+            await asyncio.sleep(5)
+
+            # Шаг 5: Ищем кнопку "Проверить" в правом столбце
+            await utils.answer(message, "✅ Ищу кнопку 'Проверить'...")
+            check_success = False
+            messages = await self.get_bot_messages(3)
+            
+            for msg in messages:
+                if msg.buttons:
+                    for row in msg.buttons:
+                        for button in row:
+                            if hasattr(button, 'text') and "Проверить" in button.text:
+                                check_success = await self.find_and_click_button(button.text, msg)
+                                if check_success:
+                                    break
+                        if check_success:
+                            break
+                    if check_success:
+                        break
+
+            if check_success:
+                await utils.answer(message, "🎉 Задание выполнено! Проверка отправлена.")
+                self.completed_tasks.append("✅ Успешное выполнение")
+            else:
+                await utils.answer(message, "⚠️ Выполнено, но кнопка 'Проверить' не найдена")
+
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+
+    @loader.command()
+    async def autostatuscmd(self, message):
+        """Статус выполненных заданий - .autostatus"""
+        if not self.completed_tasks:
+            await utils.answer(message, "📊 Выполнено заданий: 0")
+            return
+        
+        await utils.answer(message, f"📊 Выполнено заданий: {len(self.completed_tasks)}")
+
+    @loader.command()
+    async def autorestcmd(self, message):
+        """Перезапуск бота - .autorest"""
+        try:
+            await self._client(SendMessageRequest(
+                peer=await self._client.get_input_entity(self.bot_username),
+                message="/start",
+                no_webpage=True
+            ))
+            await utils.answer(message, "🔄 Бот перезапущен")
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
