@@ -1,0 +1,77 @@
+from hikka import loader, utils
+from telethon.tl import types
+import re
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+@loader.tds
+class GramAutoClicker(loader.Module):
+    """Автокликер для PR GRAM | DRAGON"""
+    
+    strings = {"name": "GramAutoClicker"}
+    
+    async def nextcmd(self, message):
+        """Найти и нажать 'Следующий пост'"""
+        try:
+            # Ищем в последних 10 сообщениях
+            async for msg in self._client.iter_messages(
+                message.chat_id, 
+                limit=10,
+                reverse=True  # Начинаем с самых новых
+            ):
+                if not hasattr(msg, 'buttons') or not msg.buttons:
+                    continue
+                    
+                logger.debug(f"Проверяем сообщение {msg.id}: {msg.text}")
+                
+                for row in msg.buttons:
+                    for button in row:
+                        if hasattr(button, 'text') and re.search(r'следующий пост|next', button.text, re.IGNORECASE):
+                            logger.debug(f"Найдена кнопка: {button.text}")
+                            
+                            if isinstance(button, types.KeyboardButtonCallback):
+                                # Нажимаем callback-кнопку
+                                result = await self._client(
+                                    types.GetBotCallbackAnswerRequest(
+                                        peer=msg.chat_id,
+                                        msg_id=msg.id,
+                                        data=button.data
+                                    )
+                                )
+                                await utils.answer(message, f"✅ Нажата кнопка в сообщении #{msg.id}")
+                                return
+                            
+            await utils.answer(message, "❌ Кнопка не найдена в последних сообщениях")
+            
+        except Exception as e:
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
+    
+    async def watcher(self, message):
+        """Автоматически нажимает кнопку при новом сообщении"""
+        try:
+            if not hasattr(message, 'buttons') or not message.buttons:
+                return
+                
+            for row in message.buttons:
+                for button in row:
+                    if hasattr(button, 'text') and re.search(r'следующий пост|next', button.text, re.IGNORECASE):
+                        if isinstance(button, types.KeyboardButtonCallback):
+                            # Нажимаем кнопку
+                            await self._client(
+                                types.GetBotCallbackAnswerRequest(
+                                    peer=message.chat_id,
+                                    msg_id=message.id,
+                                    data=button.data
+                                )
+                            )
+                            # Уведомляем о успешном нажатии
+                            await self._client.send_message(
+                                'me',  # Отправляем себе в сохранённые
+                                f"✅ Автоматически нажата кнопка в чате {message.chat_id}"
+                            )
+                            await asyncio.sleep(5)  # Пауза между нажатиями
+                            
+        except Exception as e:
+            logger.error(f"Ошибка в watcher: {e}")
