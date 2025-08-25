@@ -1,0 +1,67 @@
+from hikka import loader, utils
+from telethon.tl import types
+import re
+import asyncio
+
+@loader.tds
+class GramAutoClicker(loader.Module):
+    """Автокликер для PR GRAM | DRAGON"""
+    
+    strings = {"name": "GramAutoClicker"}
+    
+    async def nextcmd(self, message):
+        """Найти и нажать 'Следующий пост'"""
+        found = False
+        async for msg in self._client.iter_messages(
+            message.chat_id, 
+            limit=30
+        ):
+            if not msg.buttons:
+                continue
+                
+            for row in msg.buttons:
+                for button in row:
+                    if hasattr(button, 'text') and re.search(r'следующий пост|next', button.text, re.IGNORECASE):
+                        if isinstance(button, types.KeyboardButtonCallback):
+                            await self._client(
+                                types.GetBotCallbackAnswerRequest(
+                                    peer=msg.chat_id,
+                                    msg_id=msg.id,
+                                    data=button.data
+                                )
+                            )
+                            await utils.answer(message, f"✅ Нажата кнопка в сообщении #{msg.id}")
+                            await asyncio.sleep(3)
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+            if found:
+                break
+        
+        if not found:
+            await utils.answer(message, "❌ Кнопка не найдена в последних 30 сообщениях")
+    
+    async def watcher(self, message):
+        """Автоматически нажимает кнопку при новом сообщении"""
+        if not hasattr(message, 'buttons') or not message.buttons:
+            return
+            
+        for row in message.buttons:
+            for button in row:
+                if hasattr(button, 'text') and re.search(r'следующий пост|next', button.text, re.IGNORECASE):
+                    if isinstance(button, types.KeyboardButtonCallback):
+                        await self._client(
+                            types.GetBotCallbackAnswerRequest(
+                                peer=message.chat_id,
+                                msg_id=message.id,
+                                data=button.data
+                            )
+                        )
+                        await self._client.send_message(
+                            message.chat_id,
+                            "✅ Автоматически нажата кнопка 'Следующий пост'",
+                            reply_to=message.id
+                        )
